@@ -53,39 +53,38 @@ bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   const response = msg.text;
 
+  const { mUSD, mEUR, pUSD, pEUR } = currencyCache.mget([
+    `mUSD`,
+    `mEUR`,
+    `pUSD`,
+    `pEUR`,
+  ]);
+
+  if (!mUSD && !pUSD) fetchRates();
+
   switch (response) {
     case "Курс валют":
       bot.sendMessage(chatId, "Оберіть валюту: ", keyboardSubmenu);
       break;
     case "USD":
-      fetchRates(cUSD, chatId);
+      bot.sendMessage(chatId, formOutput("USD", mUSD, pUSD), keyboardMenu);
       break;
     case "EUR":
-      fetchRates(cEUR, chatId);
+      bot.sendMessage(chatId, formOutput("EUR", mEUR, pEUR), keyboardMenu);
       break;
     default:
       break;
   }
 });
 
-async function fetchRates(codeCurr, chatId) {
-  if (
-    !currencyCache.get(`mono${codeCurr}`) &&
-    !currencyCache.get(`privat${codeCurr}`)
-  ) {
-    const [monoData, privatData] = await Promise.all([
-      axios.get(urlMono),
-      axios.get(urlPrivat),
-    ]);
+async function fetchRates() {
+  const [monoData, privatData] = await Promise.all([
+    axios.get(urlMono),
+    axios.get(urlPrivat),
+  ]);
 
-    transformAndCacheMonoData(monoData);
-    transformAndCachePrivatData(privatData);
-  }
-
-  const mono = currencyCache.get(`mono${codeCurr}`);
-  const privat = currencyCache.get(`privat${codeCurr}`);
-
-  bot.sendMessage(chatId, mono.concat(privat), keyboardMenu);
+  transformAndCacheMonoData(monoData);
+  transformAndCachePrivatData(privatData);
 }
 
 function transformAndCacheMonoData({ data }) {
@@ -94,19 +93,18 @@ function transformAndCacheMonoData({ data }) {
       currencyCodeA === cUSD && currencyCodeB === cUAH
   );
 
-  const { rateBuy: rbu, rateSell: rsu } = rateUSD[0];
-
   const rateEUR = data.filter(
     ({ currencyCodeA, currencyCodeB }) =>
       currencyCodeA === cEUR && currencyCodeB === cUAH
   );
-  const { rateBuy: rbe, rateSell: rse } = rateEUR[0];
 
-  const usd = `Monobank:\n\nКурс: USD/UAH\n\nПродаж: ${rsu}\nКупівля:${rbu}\n`;
-  const eur = `Monobank:\n\nКурс: EUR/UAH\n\nПродаж: ${rse}\nКупівля:${rbe}\n`;
+  const usd = { buy: rateUSD[0].rateBuy, sell: rateUSD[0].rateSell };
+  const eur = { buy: rateEUR[0].rateBuy, sell: rateEUR[0].rateSell };
 
-  currencyCache.set(`mono${cUSD}`, usd, 1000 * 60 * 5);
-  currencyCache.set(`mono${cEUR}`, eur, 1000 * 60 * 5);
+  currencyCache.mset([
+    { key: `mUSD`, val: usd, ttl: 1000 * 60 * 5 },
+    { key: `mEUR`, val: eur, ttl: 1000 * 60 * 5 },
+  ]);
 }
 
 function transformAndCachePrivatData({ data }) {
@@ -117,12 +115,15 @@ function transformAndCachePrivatData({ data }) {
     ({ ccy, base_ccy }) => ccy === "EUR" && base_ccy === "UAH"
   );
 
-  const { buy: bu, sale: su } = rateUSD[0];
-  const { buy: be, sale: se } = rateEUR[0];
+  const usd = { buy: rateUSD[0].buy, sell: rateUSD[0].sale };
+  const eur = { buy: rateEUR[0].buy, sell: rateEUR[0].sale };
 
-  const usd = `\nPrivatbank:\n\nКурс: USD/UAH\n\nПродаж: ${su}\nКупівля:${bu}`;
-  const eur = `\nPrivatbank:\n\nКурс: EUR/UAH\n\nПродаж: ${se}\nКупівля:${be}`;
+  currencyCache.mset([
+    { key: `pUSD`, val: usd, ttl: 1000 * 60 * 5 },
+    { key: `pEUR`, val: eur, ttl: 1000 * 60 * 5 },
+  ]);
+}
 
-  currencyCache.set(`privat${cUSD}`, usd, 1000 * 60 * 5);
-  currencyCache.set(`privat${cEUR}`, eur, 1000 * 60 * 5);
+function formOutput(curr, m, p) {
+  return `Monobank:\n\nКурс: ${curr}/UAH\n\nПродаж: ${m.sell}\nКупівля:${m.buy}\n\nPrivatbank:\n\nКурс: ${curr}/UAH\n\nПродаж: ${p.sell}\nКупівля:${p.buy}`;
 }
